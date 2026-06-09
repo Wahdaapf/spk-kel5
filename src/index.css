@@ -1,117 +1,221 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Black & yellow glow palette */
+  --color-gold: var(--gold);
+  --color-yellow-glow: var(--yellow-glow);
+  --color-yellow-bright: var(--yellow-bright);
+
+  --animate-float-slow: float-slow 14s ease-in-out infinite;
+  --animate-float-slow-rev: float-slow-rev 18s ease-in-out infinite;
+  --animate-pop-in: pop-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-slide-up: slide-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-gold-shift: gold-shift 10s ease infinite;
+  --animate-shimmer: shimmer 3s linear infinite;
+}
 
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  --radius: 0.875rem;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Black & yellow — dark night with electric yellow glow */
+  --background: oklch(0.07 0 0);
+  --foreground: oklch(0.95 0 0);
+  --card: oklch(0.11 0 0);
+  --card-foreground: oklch(0.95 0 0);
+  --popover: oklch(0.11 0 0);
+  --popover-foreground: oklch(0.95 0 0);
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --primary: oklch(0.82 0.18 90);
+  --primary-foreground: oklch(0.07 0 0);
+  --secondary: oklch(0.18 0 0);
+  --secondary-foreground: oklch(0.95 0 0);
+  --muted: oklch(0.16 0 0);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.78 0.16 85);
+  --accent-foreground: oklch(0.07 0 0);
+  --destructive: oklch(0.65 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.82 0.18 90);
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
+  --gold: oklch(0.82 0.18 90);
+  --yellow-glow: oklch(0.75 0.22 85);
+  --yellow-bright: oklch(0.88 0.14 95);
+
+  --gradient-primary: linear-gradient(135deg, oklch(0.85 0.18 90), oklch(0.72 0.2 80));
+  --gradient-gold: linear-gradient(135deg, oklch(0.88 0.16 95), oklch(0.78 0.18 85));
+  --gradient-aurora: linear-gradient(120deg,
+      oklch(0.85 0.18 90) 0%,
+      oklch(0.75 0.2 80) 40%,
+      oklch(0.65 0.18 70) 70%,
+      oklch(0.82 0.16 95) 100%);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    background-image:
+      radial-gradient(1200px 600px at 10% -10%, color-mix(in oklab, var(--yellow-glow) 18%, transparent), transparent 60%),
+      radial-gradient(900px 500px at 110% 20%, color-mix(in oklab, var(--gold) 15%, transparent), transparent 60%),
+      radial-gradient(800px 500px at 50% 110%, color-mix(in oklab, var(--yellow-bright) 12%, transparent), transparent 60%);
+    background-attachment: fixed;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+@utility glass {
+  background: color-mix(in oklab, var(--card) 55%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid color-mix(in oklab, white 8%, transparent);
+  box-shadow:
+    0 10px 40px -10px color-mix(in oklab, var(--yellow-glow) 30%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 10%, transparent);
+}
+
+@utility text-gradient {
+  background: linear-gradient(135deg, oklch(0.92 0.08 95), oklch(0.82 0.14 85));
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gold-shift 8s ease infinite;
+}
+
+@utility text-glow {
+  color: oklch(0.95 0 0);
+  text-shadow:
+    0 0 20px color-mix(in oklab, var(--yellow-glow) 25%, transparent),
+    0 0 60px color-mix(in oklab, var(--gold) 15%, transparent);
+}
+
+@utility bg-gradient-primary {
+  background-image: var(--gradient-primary);
+}
+
+@utility bg-gradient-gold {
+  background-image: var(--gradient-gold);
+}
+
+@utility bg-gradient-aurora {
+  background-image: var(--gradient-aurora);
+  background-size: 200% 200%;
+  animation: gold-shift 12s ease infinite;
+}
+
+@utility glow-yellow {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--yellow-glow) 30%, transparent),
+    0 10px 30px -10px color-mix(in oklab, var(--yellow-glow) 60%, transparent),
+    0 0 40px -8px color-mix(in oklab, var(--gold) 40%, transparent);
+}
+
+@utility font-display {
+  font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+@keyframes float-slow {
+
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
   }
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
+  50% {
+    transform: translate3d(20px, -30px, 0) scale(1.08);
   }
 }
 
-body {
-  margin: 0;
-}
+@keyframes float-slow-rev {
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
+  50% {
+    transform: translate3d(-30px, 20px, 0) scale(1.1);
   }
 }
 
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
 
-  @media (max-width: 1024px) {
-    font-size: 20px;
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
-p {
-  margin: 0;
+@keyframes slide-up {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+@keyframes gold-shift {
+
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
 }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }

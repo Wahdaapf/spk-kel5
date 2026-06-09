@@ -87,22 +87,15 @@ function Index() {
                 <div className="absolute top-1/2 left-10 h-[300px] w-[300px] rounded-full bg-gold/12 blur-3xl animate-float-slow-rev" />
             </div>
 
-            <div className="mx-auto max-w-6xl px-6 py-12">
+            <div className="mx-auto max-w-6xl px-6 py-16">
                 {/* Header */}
                 <header className="mb-10 animate-pop-in">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-primary glow-yellow">
-                            <span className="text-lg font-bold text-background">D</span>
-                        </div>
-                        <span className="font-display text-sm uppercase tracking-[0.3em] text-muted-foreground">Decidra · DSS</span>
-                    </div>
+
                     <h1 className="font-display text-5xl md:text-6xl font-bold leading-[1.05]">
-                        <span className="text-glow">Sistem Pendukung</span>
-                        <br />
-                        <span className="text-foreground/80">Keputusan Multi-Kriteria</span>
+                        <span className="text-glow">Sistem Pendukung Keputusan</span>
                     </h1>
                     <p className="mt-4 max-w-2xl text-muted-foreground text-lg">
-                        Analisis alternatif Anda dengan CRITIC, Entropy, TOPSIS, dan MABAC — hasilnya elegan, transparan, dan dapat ditelusuri.
+                        Analisis alternatif Anda dengan CRITIC, Entropy, TOPSIS, dan MABAC.
                     </p>
                 </header>
 
@@ -113,10 +106,10 @@ function Index() {
                             <button
                                 onClick={() => s.n < step && setStep(s.n)}
                                 className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all duration-300 ${step === s.n
-                                        ? "bg-gradient-primary text-background shadow-lg glow-yellow scale-105"
-                                        : step > s.n
-                                            ? "bg-accent/20 text-primary hover:bg-accent/30"
-                                            : "bg-card/60 text-muted-foreground"
+                                    ? "bg-gradient-primary text-background shadow-lg glow-yellow scale-105"
+                                    : step > s.n
+                                        ? "bg-accent/20 text-primary hover:bg-accent/30"
+                                        : "bg-card/60 text-muted-foreground"
                                     }`}
                             >
                                 <span className={`flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${step >= s.n ? "bg-background/20" : "bg-muted"}`}>
@@ -155,23 +148,6 @@ function Index() {
                                 <input type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="absolute inset-0 cursor-pointer opacity-0" />
                                 <span className="relative z-10 flex items-center gap-2">📂 Import Template Terisi</span>
                             </label>
-                        </div>
-
-                        <div className="mt-10 grid sm:grid-cols-3 gap-4">
-                            {[
-                                { t: "Objektif", d: "Bobot dihitung dari data, bukan asumsi." },
-                                { t: "Cepat", d: "Hasil dalam hitungan detik." },
-                                { t: "Transparan", d: "Setiap langkah dapat ditelusuri." },
-                            ].map((f, i) => (
-                                <div
-                                    key={i}
-                                    className="rounded-2xl border border-border bg-card/40 p-4 animate-slide-up transition-all hover:border-primary/40 hover:-translate-y-1"
-                                    style={{ animationDelay: `${i * 80}ms` }}
-                                >
-                                    <div className="text-sm font-semibold text-primary">{f.t}</div>
-                                    <div className="text-sm text-muted-foreground mt-1">{f.d}</div>
-                                </div>
-                            ))}
                         </div>
                     </section>
                 )}
@@ -390,8 +366,8 @@ function MethodPicker({ label, hint, value, onChange, options }) {
                             type="button"
                             onClick={() => onChange(o.value)}
                             className={`group relative text-left rounded-xl border p-4 transition-all duration-300 ${active
-                                    ? "border-primary bg-primary/15 glow-yellow scale-[1.02]"
-                                    : "border-border bg-background/40 hover:border-primary/50 hover:bg-background/60 hover:-translate-y-0.5"
+                                ? "border-primary bg-primary/15 glow-yellow scale-[1.02]"
+                                : "border-border bg-background/40 hover:border-primary/50 hover:bg-background/60 hover:-translate-y-0.5"
                                 }`}
                         >
                             <div className="flex items-center justify-between mb-1">
