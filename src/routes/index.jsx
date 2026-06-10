@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
 import * as XLSX from "xlsx";
+import { calculateCritic } from "../utils/critic";
+import { calculateEntropy } from "../utils/entropy";
+
+import { calculateTopsis } from "../utils/topsis";
+import { calculateMabac } from "../utils/mabac";
 
 export const Route = createFileRoute("/")({
     head: () => ({
@@ -21,7 +26,7 @@ function Index() {
     const [types, setTypes] = useState([]);
     const [rows, setRows] = useState([]);
     const [method, setMethod] = useState({ bobot: "CRITIC", ranking: "TOPSIS" });
-    const [activeTab, setActiveTab] = useState(1);
+    const [activeTab, setActiveTab] = useState(0);
 
     const downloadTemplate = () => {
         const wsData = [];
@@ -72,10 +77,537 @@ function Index() {
         { n: 3, label: "Kalkulasi" },
     ];
 
-    const tabs = useMemo(
-        () => ["Matriks Awal", "Normalisasi", `Bobot (${method.bobot})`, "Matriks Terbobot", `Ranking (${method.ranking})`],
-        [method]
-    );
+    const calculation = useMemo(() => {
+        if (!rows || rows.length === 0 || !headers || headers.length <= 1) return null;
+
+        // 1. Ekstrak data untuk perhitungan
+        const altNames = rows.map((r) => r[0]);
+        const critNames = headers.slice(1);
+        const X = rows.map((row) => row.slice(1).map(Number));
+        const critTypes = types.slice(1);
+
+        if (X.length === 0 || X[0].length === 0) return null;
+
+        // 2. Hitung Pembobotan
+        let resultBobot = null;
+        let W = [];
+
+        if (method.bobot === "CRITIC") {
+            resultBobot = calculateCritic(X, critTypes);
+        }
+        else if (method.bobot === "Entropy") {
+            resultBobot = calculateEntropy(X, critTypes);
+        }
+
+        W = resultBobot?.weights || [];
+
+        // 3. Hitung Perankingan
+        let resultRanking = null;
+
+        if (W.length > 0) {
+            if (method.ranking === "TOPSIS") {
+                resultRanking = calculateTopsis(
+                    X,
+                    W,
+                    critTypes
+                );
+            }
+
+            else if (method.ranking === "MABAC") {
+                resultRanking = calculateMabac(
+                    X,
+                    W,
+                    critTypes
+                );
+            }
+        }
+
+        console.log("BOBOT =", method.bobot);
+        console.log("RANKING =", method.ranking);
+        console.log("RESULT BOBOT =", resultBobot);
+        console.log("RESULT RANKING =", resultRanking);
+
+        return { altNames, critNames, X, critTypes, bobot: resultBobot, ranking: resultRanking, finalWeights: W };
+    }, [rows, headers, types, method]);
+
+    console.log(calculation);
+
+    const renderMatrixTable = (matrixArray) => {
+        if (!matrixArray) return <p className="text-muted-foreground p-4">Data sedang diproses...</p>;
+        return (
+            <div className="overflow-x-auto rounded-xl border border-border hide-scrollbar bg-card/40 mt-4">
+                <table className="min-w-full text-sm text-left whitespace-nowrap">
+                    <thead className="bg-white/[0.03]">
+                        <tr>
+                            <th className="px-5 py-3 border-b border-border font-semibold">Alternatif</th>
+                            {calculation.critNames.map((c, i) => (
+                                <th key={i} className="px-5 py-3 border-b border-border font-semibold">{c}</th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {matrixArray.map((row, i) => (
+                            <tr key={i} className="border-b border-border/50 hover:bg-white/[0.02]">
+                                <td className="px-5 py-3 font-medium bg-white/[0.01]">{calculation.altNames[i]}</td>
+                                {row.map((val, j) => (
+                                    <td key={j} className="px-5 py-3 tabular-nums">{Number(val).toFixed(4)}</td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    };
+
+    const tabs = useMemo(() => {
+        const result = [
+            {
+                key: "matrix-awal",
+                title: "Matriks Keputusan Awal (X)",
+                desc: "Menampilkan matriks dari data Excel yang diunggah.",
+                formula: null,
+                source: calculation?.X,
+                type: "matrix",
+            }
+        ];
+
+        if (method.bobot === "CRITIC") {
+            result.push(
+                {
+                    key: "critic-norm",
+                    title: "Matriks Normalisasi",
+                    desc: "Normalisasi Min-Max berdasarkan tipe Benefit dan Cost.",
+                    formula: "r_ij=(x_ij-min)/(max-min)",
+                    source: calculation?.bobot?.norm,
+                    type: "matrix",
+                },
+                {
+                    key: "critic-stddev",
+                    title: "Standar Deviasi",
+                    desc: "Menghitung penyebaran nilai hasil normalisasi.",
+                    formula: "σ_j=STDEV.S(r_j)",
+                    source: calculation?.bobot?.stdDev,
+                    type: "vector",
+                },
+                {
+                    key: "critic-correlation",
+                    title: "Korelasi",
+                    desc: "Mengukur hubungan antar kriteria.",
+                    formula: "r_jk",
+                    source: calculation?.bobot?.correlation,
+                    type: "matrix",
+                },
+                {
+                    key: "critic-conflict",
+                    title: "Konflik",
+                    desc: "Σ(1-rjk)",
+                    formula: "C_j=Σ(1-r_jk)",
+                    source: calculation?.bobot?.conflict,
+                    type: "vector",
+                },
+                {
+                    key: "critic-info",
+                    title: "Nilai Informasi",
+                    desc: "Informasi tiap kriteria.",
+                    formula: "I_j=σ_j×C_j",
+                    source: calculation?.bobot?.info,
+                    type: "vector",
+                },
+                {
+                    key: "critic-weight",
+                    title: "Bobot CRITIC",
+                    desc: "Normalisasi nilai informasi.",
+                    formula: "w_j=I_j/ΣI_j",
+                    source: calculation?.bobot?.weights,
+                    type: "vector",
+                }
+            );
+        }
+
+        if (method.bobot === "Entropy") {
+            result.push(
+                {
+                    key: "entropy-norm",
+                    title: "Normalisasi (Entropy)",
+                    desc: "Normalisasi data",
+                    formula: "(x-min)/(max-min)",
+                    source: calculation?.bobot?.norm,
+                    type: "matrix",
+                },
+                {
+                    key: "entropy-proportion",
+                    title: "Matriks Proporsi",
+                    desc: "Pij = rij / Σrij",
+                    formula: "p_ij=r_ij/Σr_ij",
+                    source: calculation?.bobot?.proportion,
+                    type: "matrix",
+                },
+                {
+                    key: "entropy-value",
+                    title: "Nilai Entropy",
+                    desc: "Entropy tiap kriteria",
+                    formula: "E_j=-kΣ(p_ij ln p_ij)",
+                    source: calculation?.bobot?.entropy,
+                    type: "vector",
+                },
+                {
+                    key: "entropy-dispersion",
+                    title: "Dispersi",
+                    desc: "Dj = 1 - Ej",
+                    formula: "D_j=1-E_j",
+                    source: calculation?.bobot?.dispersion,
+                    type: "vector",
+                },
+                {
+                    key: "entropy-weight",
+                    title: "Bobot Entropi",
+                    desc: "Normalisasi dispersi",
+                    formula: "w_j=D_j/ΣD_j",
+                    source: calculation?.bobot?.weights,
+                    type: "vector",
+                },
+            )
+        }
+
+        if (method.ranking === "TOPSIS") {
+            result.push(
+                {
+                    key: "topsis-norm",
+                    title: "Matriks Normalisasi TOPSIS",
+                    desc: "Normalisasi vektor.",
+                    formula: "r_ij=x_ij/√Σx²",
+                    source: calculation?.ranking?.norm,
+                    type: "matrix",
+                },
+                {
+                    key: "topsis-y",
+                    title: "Matriks Y Terbobot",
+                    desc: "Normalisasi × bobot.",
+                    formula: "y_ij=r_ij×w_j",
+                    source: calculation?.ranking?.Y,
+                    type: "matrix",
+                },
+                {
+                    key: "topsis-ideal",
+                    title: "A+ & A-",
+                    desc: "Solusi ideal.",
+                    formula: null,
+                    source: {
+                        A_plus: calculation?.ranking?.A_plus,
+                        A_min: calculation?.ranking?.A_min,
+                    },
+                    type: "object",
+                },
+                {
+                    key: "topsis-distance",
+                    title: "D+ & D-",
+                    desc: "Jarak solusi ideal.",
+                    formula: null,
+                    source: {
+                        D_plus: calculation?.ranking?.D_plus,
+                        D_min: calculation?.ranking?.D_min,
+                    },
+                    type: "object",
+                },
+                {
+                    key: "topsis-ranking",
+                    title: "Preferensi & Ranking",
+                    desc: "Hasil akhir TOPSIS.",
+                    formula: "V_i=D^-/(D^++D^-)",
+                    source: {
+                        preferences: calculation?.ranking?.preferences,
+                        finalRank: calculation?.ranking?.finalRank,
+                    },
+                    type: "object",
+                }
+            );
+        }
+
+        if (method.ranking === "MABAC") {
+            result.push(
+                {
+                    key: "mabac-norm",
+                    title: "Normalisasi (MABAC)",
+                    desc: "Normalisasi matriks",
+                    formula: "(x-min)/(max-min)",
+                    source: calculation?.ranking?.norm,
+                    type: "matrix",
+                },
+                {
+                    key: "mabac-v",
+                    title: "Matriks V",
+                    desc: "Matriks terbobot",
+                    formula: "v_ij=w_j(r_ij+1)",
+                    source: calculation?.ranking?.V,
+                    type: "matrix",
+                },
+                {
+                    key: "mabac-g",
+                    title: "Border Approx (G)",
+                    desc: "Geometric Mean",
+                    formula: "G_j=(Πv_ij)^(1/m)",
+                    source: calculation?.ranking?.G,
+                    type: "vector",
+                },
+                {
+                    key: "mabac-q",
+                    title: "Q Matrix",
+                    desc: "Q = V - G",
+                    formula: "q_ij=v_ij-G_j",
+                    source: calculation?.ranking?.Q,
+                    type: "matrix",
+                },
+                {
+                    key: "mabac-ranking",
+                    title: "Nilai Akhir S & Ranking",
+                    desc: "Perankingan MABAC",
+                    formula: "S_i=Σq_ij",
+                    source: {
+                        S: calculation?.ranking?.S,
+                        finalRank: calculation?.ranking?.finalRank,
+                    },
+                    type: "object",
+                },
+            )
+        }
+
+        return result;
+    }, [calculation, method]);
+
+    console.log(method);
+    console.log(tabs.map(t => t.title));
+    const currentTab = tabs[activeTab];
+
+    const renderTabContent = (tab) => {
+        if (!tab) return null;
+
+        switch (tab.type) {
+            case "matrix":
+                return renderMatrixTable(tab.source);
+
+            case "vector":
+                return (
+                    <div className="overflow-x-auto rounded-xl border border-border bg-card/40 mt-4">
+                        <table className="min-w-full text-sm text-left">
+                            <thead className="bg-white/[0.03]">
+                                <tr>
+                                    <th className="px-5 py-3 border-b border-border font-semibold">
+                                        Kriteria
+                                    </th>
+                                    <th className="px-5 py-3 border-b border-border font-semibold">
+                                        Nilai
+                                    </th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {tab.source?.map((value, i) => (
+                                    <tr
+                                        key={i}
+                                        className="border-b border-border/50 hover:bg-white/[0.02]"
+                                    >
+                                        <td className="px-5 py-3 font-medium">
+                                            {calculation?.critNames?.[i]}
+                                        </td>
+
+                                        <td className="px-5 py-3 tabular-nums">
+                                            {typeof value === "number"
+                                                ? value.toFixed(6)
+                                                : value}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                );
+
+            case "object":
+                if (tab.key === "topsis-ideal") {
+                    return (
+                        <div className="overflow-x-auto rounded-xl border border-border bg-card/40 mt-4">
+                            <table className="min-w-full text-sm text-left">
+                                <thead className="bg-white/[0.03]">
+                                    <tr>
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            Kriteria
+                                        </th>
+
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            A+
+                                        </th>
+
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            A-
+                                        </th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    {calculation.critNames.map((crit, i) => (
+                                        <tr
+                                            key={i}
+                                            className="border-b border-border/50 hover:bg-white/[0.02]"
+                                        >
+                                            <td className="px-5 py-3 font-medium">
+                                                {crit}
+                                            </td>
+
+                                            <td className="px-5 py-3">
+                                                {tab.source.A_plus[i].toFixed(6)}
+                                            </td>
+
+                                            <td className="px-5 py-3">
+                                                {tab.source.A_min[i].toFixed(6)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                }
+
+                if (tab.key === "topsis-distance") {
+                    return (
+                        <div className="overflow-x-auto rounded-xl border border-border bg-card/40 mt-4">
+                            <table className="min-w-full text-sm text-left whitespace-nowrap">
+                                <thead className="bg-white/[0.03]">
+                                    <tr>
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            Alternatif
+                                        </th>
+
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            D+
+                                        </th>
+
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            D-
+                                        </th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    {calculation.altNames.map((alt, i) => (
+                                        <tr
+                                            key={i}
+                                            className="border-b border-border/50 hover:bg-white/[0.02]"
+                                        >
+                                            <td className="px-5 py-3 font-medium">
+                                                {alt}
+                                            </td>
+
+                                            <td className="px-5 py-3">
+                                                {tab.source.D_plus[i].toFixed(6)}
+                                            </td>
+
+                                            <td className="px-5 py-3">
+                                                {tab.source.D_min[i].toFixed(6)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                }
+
+                if (tab.key === "topsis-ranking") {
+                    return (
+                        <div className="overflow-x-auto rounded-xl border border-border bg-card/40 mt-4">
+                            <table className="min-w-full text-sm text-left whitespace-nowrap">
+                                <thead className="bg-white/[0.03]">
+                                    <tr>
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            Alternatif
+                                        </th>
+
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            Preferensi
+                                        </th>
+
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            Ranking
+                                        </th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    {calculation.altNames.map((alt, i) => (
+                                        <tr
+                                            key={i}
+                                            className="border-b border-border/50 hover:bg-white/[0.02]"
+                                        >
+                                            <td className="px-5 py-3 font-medium">
+                                                {alt}
+                                            </td>
+
+                                            <td className="px-5 py-3">
+                                                {tab.source.preferences[i].toFixed(6)}
+                                            </td>
+
+                                            <td className="px-5 py-3">
+                                                {tab.source.finalRank[i]}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                }
+
+                if (tab.key === "mabac-ranking") {
+                    return (
+                        <div className="overflow-x-auto rounded-xl border border-border bg-card/40 mt-4">
+                            <table className="min-w-full text-sm text-left whitespace-nowrap">
+                                <thead className="bg-white/[0.03]">
+                                    <tr>
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            Alternatif
+                                        </th>
+
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            Nilai S
+                                        </th>
+
+                                        <th className="px-5 py-3 border-b border-border font-semibold">
+                                            Ranking
+                                        </th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    {calculation.altNames.map((alt, i) => (
+                                        <tr
+                                            key={i}
+                                            className="border-b border-border/50 hover:bg-white/[0.02]"
+                                        >
+                                            <td className="px-5 py-3 font-medium">
+                                                {alt}
+                                            </td>
+
+                                            <td className="px-5 py-3">
+                                                {tab.source.S[i].toFixed(6)}
+                                            </td>
+
+                                            <td className="px-5 py-3">
+                                                {tab.source.finalRank[i]}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                }
+
+            default:
+                return null;
+        }
+    };
 
     return (
         <div className="relative min-h-screen overflow-hidden">
@@ -162,7 +694,7 @@ function Index() {
                             </div>
                         </div>
 
-                        <div className="overflow-x-auto rounded-2xl border border-border bg-card/40 mb-6">
+                        <div className="overflow-x-auto rounded-2xl border border-border hide-scrollbar bg-card/40 mb-6">
                             <table className="min-w-full text-sm">
                                 <thead>
                                     <tr className="bg-white/[0.03]">
@@ -271,58 +803,35 @@ function Index() {
                             </button>
                         </div>
 
-                        <div className="flex gap-1 border-b border-border mb-6 overflow-x-auto pb-px">
-                            {tabs.map((tabName, index) => (
+                        <div className="flex gap-1 border-b border-border mb-6 overflow-x-auto hide-scrollbar pb-px">
+                            {tabs.map((tab, index) => (
                                 <button
-                                    key={index}
-                                    onClick={() => setActiveTab(index + 1)}
-                                    className={`relative whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors ${activeTab === index + 1 ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                                    key={tab.key}
+                                    onClick={() => setActiveTab(index)}
+                                    className={`relative whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors ${activeTab === index
+                                        ? "text-foreground"
+                                        : "text-muted-foreground hover:text-foreground"
                                         }`}
                                 >
-                                    {tabName}
-                                    {activeTab === index + 1 && (
+                                    {tab.title}
+                                    {activeTab === index && (
                                         <span className="absolute bottom-[-1px] left-0 right-0 h-0.5 bg-gradient-primary rounded-full animate-slide-up" />
                                     )}
                                 </button>
                             ))}
                         </div>
 
-                        <div key={activeTab} className="rounded-2xl border border-border bg-card/40 p-6 min-h-[320px] animate-pop-in">
-                            {activeTab === 1 && (
-                                <TabPane title="1. Matriks Keputusan Awal (X)" desc="Menampilkan matriks dari data Excel yang diunggah." />
-                            )}
-                            {activeTab === 2 && (
-                                <TabPane
-                                    title="2. Matriks Normalisasi (R)"
-                                    desc={`Normalisasi data berdasarkan sifat kriteria untuk metode ${method.ranking}.`}
-                                    formula="r_ij = x_ij / √(Σ x_ij²)"
-                                />
-                            )}
-                            {activeTab === 3 && (
-                                <TabPane
-                                    title={`3. Pembobotan ${method.bobot} (W)`}
-                                    desc="Perhitungan bobot objektif menggunakan nilai informasi dari data. Total bobot Σ w_j = 1."
-                                />
-                            )}
-                            {activeTab === 4 && (
-                                <TabPane
-                                    title="4. Matriks Ternormalisasi Terbobot (V)"
-                                    desc="Mengalikan matriks normalisasi (R) dengan bobot (W)."
-                                    formula="v_ij = r_ij × w_j"
-                                />
-                            )}
-                            {activeTab === 5 && (
-                                <div>
-                                    <div className="inline-flex items-center gap-2 rounded-full bg-gold/20 px-3 py-1 text-xs font-semibold text-gold mb-3">
-                                        🏆 Hasil Akhir
-                                    </div>
-                                    <h3 className="font-display text-xl font-bold mb-2">5. Perankingan {method.ranking}</h3>
-                                    <p className="text-muted-foreground">Data telah diurutkan dari nilai akhir tertinggi ke terendah.</p>
-                                    <div className="mt-6 h-32 rounded-xl bg-gradient-aurora opacity-80 border border-border flex items-center justify-center text-background text-sm font-semibold">
-                                        Hasil ranking akan ditampilkan di sini
-                                    </div>
-                                </div>
-                            )}
+                        <div
+                            key={currentTab?.key}
+                            className="rounded-2xl border border-border bg-card/40 p-6 min-h-[320px] animate-pop-in"
+                        >
+                            <TabPane
+                                title={currentTab?.title}
+                                desc={currentTab?.desc}
+                                formula={currentTab?.formula}
+                            />
+
+                            {renderTabContent(currentTab)}
                         </div>
                     </section>
                 )}
@@ -331,7 +840,7 @@ function Index() {
                     Decidra · Crafted for clear decisions
                 </footer>
             </div>
-        </div>
+        </div >
     );
 }
 
