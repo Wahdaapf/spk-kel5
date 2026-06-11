@@ -28,6 +28,441 @@ function Index() {
     const [method, setMethod] = useState({ bobot: "CRITIC", ranking: "TOPSIS" });
     const [activeTab, setActiveTab] = useState(0);
 
+    const exportToExcel = () => {
+        if (!calculation) return;
+        const wb = XLSX.utils.book_new();
+        const { altNames, critNames, X, critTypes } = calculation;
+        const m = altNames.length;   // jumlah alternatif
+        const n = critNames.length;  // jumlah kriteria
+
+        // ── Helpers ────────────────────────────────────────────────
+        // Konversi index kolom (1-based) ke huruf Excel: 1→A, 2→B, 27→AA, dst.
+        const colLetter = (idx) => {
+            let result = "";
+            while (idx > 0) {
+                const rem = (idx - 1) % 26;
+                result = String.fromCharCode(65 + rem) + result;
+                idx = Math.floor((idx - 1) / 26);
+            }
+            return result;
+        };
+
+        // Kriteria j (0-indexed) → huruf kolom Excel
+        // Kolom A = Alternatif, Kolom B = Kriteria 1 (j=0), Kolom C = Kriteria 2 (j=1), dst.
+        const cCol = (j) => colLetter(j + 2);
+
+        // Baris data: Baris 1=header, Baris 2=rumus/catatan, Baris 3...(2+m)=data
+        const dRow = (i) => i + 3;  // i adalah 0-indexed alternatif
+        const dataEndRow = 2 + m;   // baris data terakhir
+        const critEndRow = 2 + n;   // baris kriteria terakhir (untuk sheet vektor)
+
+        // Buat referensi sel lintas sheet: 'NamaSheet'!ColRow
+        const ref = (sh, col, row) => `'${sh}'!${col}${row}`;
+        // Buat referensi range kolom lintas sheet: 'NamaSheet'!B3:B17
+        const rng = (sh, col, r1, r2) => `'${sh}'!${col}${r1}:${col}${r2}`;
+        // Buat referensi range baris lintas sheet: 'NamaSheet'!B3:K3
+        const rowRng = (sh, col1, col2, row) => `'${sh}'!${col1}${row}:${col2}${row}`;
+
+        // Konstruktor sel
+        const fCell = (formula) => ({ f: formula, t: "n" });
+        const sCell = (str)     => ({ v: String(str), t: "s" });
+        const nCell = (num)     => ({ v: Number(num), t: "n" });
+
+        // Bangun worksheet dari array 2D berisi objek sel atau nilai primitif
+        const buildWs = (rows2d) => {
+            const ws = {};
+            let maxR = 0, maxC = 0;
+            rows2d.forEach((row, r) => {
+                row.forEach((cell, c) => {
+                    if (cell === null || cell === undefined) return;
+                    const addr = XLSX.utils.encode_cell({ r, c });
+                    if (typeof cell === "object") {
+                        ws[addr] = { ...cell };
+                    } else if (typeof cell === "number") {
+                        ws[addr] = { v: cell, t: "n" };
+                    } else {
+                        ws[addr] = { v: String(cell), t: "s" };
+                    }
+                    if (r > maxR) maxR = r;
+                    if (c > maxC) maxC = c;
+                });
+            });
+            ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } });
+            return ws;
+        };
+
+        // ── Nama sheet (konsisten untuk cross-reference) ───────────
+        const SH = {
+            raw:           "1. Matriks Awal (X)",
+            // CRITIC
+            cNorm:         "2a. Normalisasi CRITIC",
+            cCorr:         "2b. Korelasi",
+            cStd:          "2c. Std Deviasi",
+            cConfl:        "2d. Konflik",
+            cInfo:         "2e. Nilai Informasi",
+            cWeight:       "2f. Bobot CRITIC",
+            // Entropy
+            eNorm:         "2a. Normalisasi Entropy",
+            eProp:         "2b. Matriks Proporsi",
+            eVal:          "2c. Nilai Entropy",
+            eDisp:         "2d. Dispersi",
+            eWeight:       "2e. Bobot Entropy",
+            // TOPSIS
+            tNorm:         "3a. Normalisasi TOPSIS",
+            tY:            "3b. Matriks Y Terbobot",
+            tIdeal:        "3c. Solusi Ideal",
+            tDist:         "3d. Jarak Ideal",
+            tRank:         "3e. Preferensi & Ranking",
+            // MABAC
+            mNorm:         "3a. Normalisasi MABAC",
+            mV:            "3b. Matriks V Terbobot",
+            mG:            "3c. Border Approx (G)",
+            mQ:            "3d. Q Matrix",
+            mRank:         "3e. Nilai S & Ranking",
+        };
+
+        // Sheet bobot aktif dan referensi ke w_j
+        const wSh  = method.bobot === "CRITIC" ? SH.cWeight : SH.eWeight;
+        const wRef = (j) => ref(wSh, "B", j + 3);  // w_j ada di kolom B baris (j+3)
+
+        // ── 1. Matriks Keputusan Awal (X) — nilai mentah ──────────
+        {
+            const header = [sCell("Alternatif"), ...critNames.map(sCell)];
+            const note   = [sCell("Data asli dari input Excel"), ...Array(n).fill(sCell(""))];
+            const body   = X.map((row, i) => [sCell(altNames[i]), ...row.map(nCell)]);
+            XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.raw);
+        }
+
+        // ── 2a. Normalisasi Min-Max ────────────────────────────────
+        // Digunakan oleh CRITIC & Entropy (rumus sama)
+        const normSh = method.bobot === "CRITIC" ? SH.cNorm : SH.eNorm;
+        {
+            const rumusTeks = method.bobot === "CRITIC"
+                ? "r_ij=(x_ij-MIN(kolom_j))/(MAX(kolom_j)-MIN(kolom_j)) [Benefit]; =(MAX-x_ij)/(MAX-MIN) [Cost]"
+                : "r_ij=(x_ij-MIN(kolom_j))/(MAX(kolom_j)-MIN(kolom_j))";
+            const header = [sCell("Alternatif"), ...critNames.map(sCell)];
+            const note   = [sCell(`Rumus: ${rumusTeks}`), ...Array(n).fill(sCell(""))];
+            const body   = X.map((_, i) => {
+                const r = dRow(i);
+                const cells = [sCell(altNames[i])];
+                for (let j = 0; j < n; j++) {
+                    const col = cCol(j);
+                    const src    = ref(SH.raw, col, r);
+                    const minVal = `MIN(${rng(SH.raw, col, 3, dataEndRow)})`;
+                    const maxVal = `MAX(${rng(SH.raw, col, 3, dataEndRow)})`;
+                    const isBen  = (critTypes[j] || "").toLowerCase() !== "cost";
+                    cells.push(fCell(
+                        isBen
+                            ? `=(${src}-${minVal})/(${maxVal}-${minVal})`
+                            : `=(${maxVal}-${src})/(${maxVal}-${minVal})`
+                    ));
+                }
+                return cells;
+            });
+            XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), normSh);
+        }
+
+        // ── CRITIC: Korelasi, Std Dev, Konflik, Info, Bobot ────────
+        if (method.bobot === "CRITIC") {
+            // 2b. Korelasi (matriks n×n)
+            {
+                const header = [sCell("Kriteria"), ...critNames.map(sCell)];
+                const note   = [sCell("Rumus: r_jk=CORREL(kolom_j, kolom_k) pada matriks normalisasi"), ...Array(n).fill(sCell(""))];
+                const body   = critNames.map((crit, j) => {
+                    const rangeJ = rng(normSh, cCol(j), 3, dataEndRow);
+                    const cells  = [sCell(crit)];
+                    for (let k = 0; k < n; k++) {
+                        const rangeK = rng(normSh, cCol(k), 3, dataEndRow);
+                        cells.push(fCell(`=CORREL(${rangeJ},${rangeK})`));
+                    }
+                    return cells;
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.cCorr);
+            }
+
+            // 2c. Standar Deviasi
+            {
+                const header = [sCell("Kriteria"), sCell("σ_j (Std Deviasi)")];
+                const note   = [sCell("Rumus: σ_j=STDEV(kolom_j pada matriks normalisasi)"), sCell("")];
+                const body   = critNames.map((crit, j) => [
+                    sCell(crit),
+                    fCell(`=STDEV(${rng(normSh, cCol(j), 3, dataEndRow)})`),
+                ]);
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.cStd);
+            }
+
+            // 2d. Konflik  C_j = Σ_k (1 - r_jk)
+            {
+                const lastCorrCol = cCol(n - 1);
+                const header = [sCell("Kriteria"), sCell("C_j (Konflik)")];
+                const note   = [sCell("Rumus: C_j=SUMPRODUCT(1-baris_j_di_matriks_korelasi)"), sCell("")];
+                const body   = critNames.map((crit, j) => {
+                    const corrRow  = j + 3;
+                    const rowRange = `${ref(SH.cCorr, "B", corrRow)}:${ref(SH.cCorr, lastCorrCol, corrRow)}`;
+                    return [sCell(crit), fCell(`=SUMPRODUCT(1-(${rowRange}))`)];
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.cConfl);
+            }
+
+            // 2e. Nilai Informasi  I_j = σ_j × C_j
+            {
+                const header = [sCell("Kriteria"), sCell("I_j (Nilai Informasi)")];
+                const note   = [sCell("Rumus: I_j=σ_j×C_j"), sCell("")];
+                const body   = critNames.map((crit, j) => {
+                    const row = j + 3;
+                    return [sCell(crit), fCell(`=${ref(SH.cStd, "B", row)}*${ref(SH.cConfl, "B", row)}`)];
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.cInfo);
+            }
+
+            // 2f. Bobot CRITIC  w_j = I_j / ΣI_j
+            {
+                const sumInfo = `SUM(${rng(SH.cInfo, "B", 3, critEndRow)})`;
+                const header  = [sCell("Kriteria"), sCell("w_j (Bobot CRITIC)")];
+                const note    = [sCell("Rumus: w_j=I_j/ΣI_j"), sCell("")];
+                const body    = critNames.map((crit, j) => {
+                    const row = j + 3;
+                    return [sCell(crit), fCell(`=${ref(SH.cInfo, "B", row)}/(${sumInfo})`)];
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.cWeight);
+            }
+        }
+
+        // ── Entropy: Proporsi, Nilai Entropy, Dispersi, Bobot ──────
+        if (method.bobot === "Entropy") {
+            // 2b. Matriks Proporsi  p_ij = r_ij / Σ_i r_ij
+            {
+                const header = [sCell("Alternatif"), ...critNames.map(sCell)];
+                const note   = [sCell("Rumus: p_ij=r_ij/SUM(kolom_j) — proporsi nilai tiap kolom"), ...Array(n).fill(sCell(""))];
+                const body   = X.map((_, i) => {
+                    const r = dRow(i);
+                    const cells = [sCell(altNames[i])];
+                    for (let j = 0; j < n; j++) {
+                        const col    = cCol(j);
+                        const src    = ref(normSh, col, r);
+                        const colSum = `SUM(${rng(normSh, col, 3, dataEndRow)})`;
+                        cells.push(fCell(`=IF(${colSum}=0,0,${src}/(${colSum}))`));
+                    }
+                    return cells;
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.eProp);
+            }
+
+            // 2c. Nilai Entropy  E_j = -(1/ln m) × Σ p_ij ln(p_ij)
+            {
+                const header = [sCell("Kriteria"), sCell("E_j (Nilai Entropy)")];
+                const note   = [sCell(`Rumus: E_j=-(1/LN(${m}))×SUMPRODUCT(IFERROR(p_ij×LN(p_ij),0))`), sCell("")];
+                const body   = critNames.map((crit, j) => {
+                    const col    = cCol(j);
+                    const pRange = rng(SH.eProp, col, 3, dataEndRow);
+                    return [
+                        sCell(crit),
+                        fCell(`=-(1/LN(${m}))*SUMPRODUCT(IFERROR(${pRange}*LN(${pRange}),0))`),
+                    ];
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.eVal);
+            }
+
+            // 2d. Dispersi  D_j = 1 - E_j
+            {
+                const header = [sCell("Kriteria"), sCell("D_j (Dispersi)")];
+                const note   = [sCell("Rumus: D_j=1-E_j"), sCell("")];
+                const body   = critNames.map((crit, j) => [
+                    sCell(crit),
+                    fCell(`=1-${ref(SH.eVal, "B", j + 3)}`),
+                ]);
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.eDisp);
+            }
+
+            // 2e. Bobot Entropy  w_j = D_j / ΣD_j
+            {
+                const sumDisp = `SUM(${rng(SH.eDisp, "B", 3, critEndRow)})`;
+                const header  = [sCell("Kriteria"), sCell("w_j (Bobot Entropy)")];
+                const note    = [sCell("Rumus: w_j=D_j/ΣD_j"), sCell("")];
+                const body    = critNames.map((crit, j) => [
+                    sCell(crit),
+                    fCell(`=${ref(SH.eDisp, "B", j + 3)}/(${sumDisp})`),
+                ]);
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.eWeight);
+            }
+        }
+
+        // ── TOPSIS ─────────────────────────────────────────────────
+        if (method.ranking === "TOPSIS") {
+            // 3a. Normalisasi Vektor  r_ij = x_ij / sqrt(Σ x_ij²)
+            {
+                const header = [sCell("Alternatif"), ...critNames.map(sCell)];
+                const note   = [sCell("Rumus: r_ij=x_ij/SQRT(SUMSQ(kolom_j))"), ...Array(n).fill(sCell(""))];
+                const body   = X.map((_, i) => {
+                    const r = dRow(i);
+                    const cells = [sCell(altNames[i])];
+                    for (let j = 0; j < n; j++) {
+                        const col  = cCol(j);
+                        const src  = ref(SH.raw, col, r);
+                        const sqRg = rng(SH.raw, col, 3, dataEndRow);
+                        cells.push(fCell(`=${src}/SQRT(SUMSQ(${sqRg}))`));
+                    }
+                    return cells;
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.tNorm);
+            }
+
+            // 3b. Matriks Y Terbobot  y_ij = r_ij × w_j
+            {
+                const header = [sCell("Alternatif"), ...critNames.map(sCell)];
+                const note   = [sCell("Rumus: y_ij=r_ij×w_j"), ...Array(n).fill(sCell(""))];
+                const body   = X.map((_, i) => {
+                    const r = dRow(i);
+                    const cells = [sCell(altNames[i])];
+                    for (let j = 0; j < n; j++) {
+                        cells.push(fCell(`=${ref(SH.tNorm, cCol(j), r)}*${wRef(j)}`));
+                    }
+                    return cells;
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.tY);
+            }
+
+            // 3c. Solusi Ideal A+ & A-
+            {
+                const header = [sCell("Kriteria"), sCell("A+ (Ideal Positif)"), sCell("A- (Ideal Negatif)")];
+                const note   = [sCell("Rumus: A+_j=MAX(y_j) [Benefit] / MIN(y_j) [Cost]; A-_j sebaliknya"), sCell(""), sCell("")];
+                const body   = critNames.map((crit, j) => {
+                    const col   = cCol(j);
+                    const range = rng(SH.tY, col, 3, dataEndRow);
+                    const isBen = (critTypes[j] || "").toLowerCase() !== "cost";
+                    return [
+                        sCell(crit),
+                        fCell(isBen ? `=MAX(${range})` : `=MIN(${range})`),
+                        fCell(isBen ? `=MIN(${range})` : `=MAX(${range})`),
+                    ];
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.tIdeal);
+            }
+
+            // 3d. Jarak D+ & D-  D+_i = sqrt(Σ(y_ij - A+_j)²)
+            {
+                const header = [sCell("Alternatif"), sCell("D+ (Jarak ke A+)"), sCell("D- (Jarak ke A-)")];
+                const note   = [sCell("Rumus: D+_i=SQRT(Σ(y_ij-A+_j)²); D-_i=SQRT(Σ(y_ij-A-_j)²)"), sCell(""), sCell("")];
+                const body   = altNames.map((alt, i) => {
+                    const r = dRow(i);
+                    const sqPlus  = critNames.map((_, j) =>
+                        `(${ref(SH.tY, cCol(j), r)}-${ref(SH.tIdeal, "B", j + 3)})^2`
+                    ).join("+");
+                    const sqMinus = critNames.map((_, j) =>
+                        `(${ref(SH.tY, cCol(j), r)}-${ref(SH.tIdeal, "C", j + 3)})^2`
+                    ).join("+");
+                    return [sCell(alt), fCell(`=SQRT(${sqPlus})`), fCell(`=SQRT(${sqMinus})`)];
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.tDist);
+            }
+
+            // 3e. Preferensi & Ranking  V_i = D-_i / (D+_i + D-_i)
+            {
+                const header = [sCell("Alternatif"), sCell("Preferensi (V_i)"), sCell("Ranking")];
+                const note   = [sCell("Rumus: V_i=D-_i/(D+_i+D-_i); Ranking=RANK(V_i, semua_V, DESC)"), sCell(""), sCell("")];
+                const body   = altNames.map((alt, i) => {
+                    const r     = dRow(i);
+                    const dPlus = ref(SH.tDist, "B", r);
+                    const dMin  = ref(SH.tDist, "C", r);
+                    return [
+                        sCell(alt),
+                        fCell(`=${dMin}/(${dPlus}+${dMin})`),
+                        fCell(`=RANK(B${r},B$3:B$${dataEndRow},0)`),
+                    ];
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.tRank);
+            }
+        }
+
+        // ── MABAC ──────────────────────────────────────────────────
+        if (method.ranking === "MABAC") {
+            // 3a. Normalisasi Min-Max (sama dengan CRITIC/Entropy tapi dari raw)
+            {
+                const header = [sCell("Alternatif"), ...critNames.map(sCell)];
+                const note   = [sCell("Rumus: r_ij=(x_ij-MIN)/(MAX-MIN) [Benefit]; =(MAX-x_ij)/(MAX-MIN) [Cost]"), ...Array(n).fill(sCell(""))];
+                const body   = X.map((_, i) => {
+                    const r = dRow(i);
+                    const cells = [sCell(altNames[i])];
+                    for (let j = 0; j < n; j++) {
+                        const col    = cCol(j);
+                        const src    = ref(SH.raw, col, r);
+                        const minVal = `MIN(${rng(SH.raw, col, 3, dataEndRow)})`;
+                        const maxVal = `MAX(${rng(SH.raw, col, 3, dataEndRow)})`;
+                        const isBen  = (critTypes[j] || "").toLowerCase() !== "cost";
+                        cells.push(fCell(
+                            isBen
+                                ? `=(${src}-${minVal})/(${maxVal}-${minVal})`
+                                : `=(${maxVal}-${src})/(${maxVal}-${minVal})`
+                        ));
+                    }
+                    return cells;
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.mNorm);
+            }
+
+            // 3b. Matriks V Terbobot  v_ij = w_j × (r_ij + 1)
+            {
+                const header = [sCell("Alternatif"), ...critNames.map(sCell)];
+                const note   = [sCell("Rumus: v_ij=w_j×(r_ij+1)"), ...Array(n).fill(sCell(""))];
+                const body   = X.map((_, i) => {
+                    const r = dRow(i);
+                    const cells = [sCell(altNames[i])];
+                    for (let j = 0; j < n; j++) {
+                        cells.push(fCell(`=${wRef(j)}*(${ref(SH.mNorm, cCol(j), r)}+1)`));
+                    }
+                    return cells;
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.mV);
+            }
+
+            // 3c. Border Approximation Area  G_j = (Π v_ij)^(1/m)
+            {
+                const header = [sCell("Kriteria"), sCell("G_j (Border Approx)")];
+                const note   = [sCell(`Rumus: G_j=PRODUCT(kolom_j_di_V)^(1/${m}) — rata-rata geometri`), sCell("")];
+                const body   = critNames.map((crit, j) => [
+                    sCell(crit),
+                    fCell(`=PRODUCT(${rng(SH.mV, cCol(j), 3, dataEndRow)})^(1/${m})`),
+                ]);
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.mG);
+            }
+
+            // 3d. Q Matrix  q_ij = v_ij - G_j
+            {
+                const header = [sCell("Alternatif"), ...critNames.map(sCell)];
+                const note   = [sCell("Rumus: q_ij=v_ij-G_j"), ...Array(n).fill(sCell(""))];
+                const body   = X.map((_, i) => {
+                    const r = dRow(i);
+                    const cells = [sCell(altNames[i])];
+                    for (let j = 0; j < n; j++) {
+                        cells.push(fCell(`=${ref(SH.mV, cCol(j), r)}-${ref(SH.mG, "B", j + 3)}`));
+                    }
+                    return cells;
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.mQ);
+            }
+
+            // 3e. Nilai S & Ranking  S_i = Σ_j q_ij
+            {
+                const lastQCol = cCol(n - 1);
+                const header   = [sCell("Alternatif"), sCell("S_i (Nilai Akhir)"), sCell("Ranking")];
+                const note     = [sCell("Rumus: S_i=SUM(baris_i_Q); Ranking=RANK(S_i, semua_S, DESC)"), sCell(""), sCell("")];
+                const body     = altNames.map((alt, i) => {
+                    const r     = dRow(i);
+                    const qRng  = rowRng(SH.mQ, "B", lastQCol, r);
+                    return [
+                        sCell(alt),
+                        fCell(`=SUM(${qRng})`),
+                        fCell(`=RANK(B${r},B$3:B$${dataEndRow},0)`),
+                    ];
+                });
+                XLSX.utils.book_append_sheet(wb, buildWs([header, note, ...body]), SH.mRank);
+            }
+        }
+
+        const fileName = `Hasil_SPK_${method.bobot}_${method.ranking}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+    };
+
     const downloadTemplate = () => {
         const wsData = [];
         const headerRow = ["Alternatif"];
@@ -798,9 +1233,19 @@ function Index() {
                                 <h2 className="font-display text-2xl font-bold">Langkah 3 · Proses Matematis</h2>
                                 <p className="text-muted-foreground text-sm mt-1">Telusuri tiap tahap kalkulasi secara terstruktur.</p>
                             </div>
-                            <button onClick={() => setStep(2)} className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm hover:bg-card/80 transition-colors">
-                                Kembali Edit
-                            </button>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <button
+                                    onClick={exportToExcel}
+                                    className="group relative overflow-hidden rounded-xl bg-gradient-gold px-4 py-2 font-semibold text-background text-sm transition-transform hover:scale-[1.04] active:scale-[0.97] flex items-center gap-2 shadow-lg"
+                                    title="Export semua tahap kalkulasi ke Excel"
+                                >
+                                    <span className="text-base">📊</span>
+                                    Export Excel
+                                </button>
+                                <button onClick={() => setStep(2)} className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm hover:bg-card/80 transition-colors">
+                                    Kembali Edit
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex gap-1 border-b border-border mb-6 overflow-x-auto hide-scrollbar pb-px">
